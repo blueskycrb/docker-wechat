@@ -40,6 +40,8 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
+      with:
+        driver: docker
 
     - name: Check Docker Hub publish settings
       id: dockerhub
