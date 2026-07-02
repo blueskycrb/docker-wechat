@@ -60,6 +60,7 @@ RUN set -e \
          libxcb-xkb1 libxcb-xinerama0 libxcb-glx0 \
          libxtst6 libxss1 \
          libasound2 libpulse0 libatomic1 \
+         xdotool wmctrl \
     # 生成中文 locale
     && sed -i 's/# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen \
     && locale-gen \

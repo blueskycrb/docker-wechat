@@ -23,6 +23,14 @@
 |`SECURE_CONNECTION_VNC_METHOD`| 执行安全VNC连接的方法。可能的值为`SSL`或`TLS`。更多详情请参见[安全](#security)部分。 | `SSL` |
 |`SECURE_CONNECTION_CERTS_CHECK_INTERVAL`| 系统验证Web或VNC证书是否已更改的间隔时间（秒）。当检测到更改时，受影响的服务会自动重启。值为`0`时禁用检查。 | `60` |
 |`VNC_PASSWORD`| 连接到应用程序GUI所需的密码。更多详情请参见[VNC密码](#vnc-password)部分。 | （无值） |
+|`WECHAT_MOBILE_ADAPT`| 当设置为`1`时，启动后自动调整微信窗口位置和尺寸，适合手机 noVNC/iOS WebView 访问。 | `0` |
+|`WECHAT_WINDOW_MODE`| 手机适配时的窗口调整方式。`fit`表示按指定尺寸移动/缩放窗口；`maximize`表示再请求窗口管理器最大化。 | `fit` |
+|`WECHAT_WINDOW_MARGIN`| 手机适配窗口四周留白像素。 | `0` |
+|`WECHAT_WINDOW_X`| 手机适配窗口左上角 X 坐标。未设置时使用`WECHAT_WINDOW_MARGIN`。 | （无值） |
+|`WECHAT_WINDOW_Y`| 手机适配窗口左上角 Y 坐标。未设置时使用`WECHAT_WINDOW_MARGIN`。 | （无值） |
+|`WECHAT_WINDOW_WIDTH`| 手机适配窗口宽度。未设置时使用`DISPLAY_WIDTH - 2 * WECHAT_WINDOW_MARGIN`。 | （无值） |
+|`WECHAT_WINDOW_HEIGHT`| 手机适配窗口高度。未设置时使用`DISPLAY_HEIGHT - 2 * WECHAT_WINDOW_MARGIN`。 | （无值） |
+|`WECHAT_WINDOW_WAIT_TIMEOUT`| 启动后等待微信窗口出现的最长秒数。 | `30` |
 
 # docker-compose.yml
 ```
@@ -48,6 +56,39 @@ services:
     privileged: true
 ```
 
+# iPhone / 手机端 noVNC 适配
+
+如果你要通过 iOS IPA 壳或手机浏览器访问，建议不要使用默认的`1920x1080`桌面。默认分辨率会导致 PC 微信窗口在手机竖屏里非常小。可以改成接近手机竖屏的显示尺寸，并开启微信窗口自动适配：
+
+```yaml
+services:
+  wechat:
+    image: ricwang/docker-wechat:latest
+    container_name: wechat_container_mobile
+    volumes:
+      - <THE PATH>/.xwechat:/root/.xwechat
+      - <THE PATH>/xwechat_files:/root/xwechat_files
+      - <THE PATH>/downloads:/root/downloads
+      - /dev/snd:/dev/snd
+    ports:
+      - "6800:5800"
+      - "6900:5900"
+    hostname: wechat
+    environment:
+      - LANG=zh_CN.UTF-8
+      - USER_ID=0
+      - GROUP_ID=0
+      - WEB_AUDIO=1
+      - TZ=Asia/Shanghai
+      - DISPLAY_WIDTH=430
+      - DISPLAY_HEIGHT=932
+      - WECHAT_MOBILE_ADAPT=1
+      - WECHAT_WINDOW_MODE=fit
+      - WECHAT_WINDOW_MARGIN=0
+    privileged: true
+```
+
+也可以按自己的手机调整`DISPLAY_WIDTH`和`DISPLAY_HEIGHT`，例如`390x844`、`430x932`、`540x960`、`720x1280`。如果窗口仍然不够大，可以尝试设置`WECHAT_WINDOW_MODE=maximize`。
 # docker run
 ```
 docker run -d \
