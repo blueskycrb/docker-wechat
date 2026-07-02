@@ -41,7 +41,23 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
 
+    - name: Check Docker Hub publish settings
+      id: dockerhub
+      env:
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        DOCKER_REPOSITORY: ${{ secrets.DOCKER_REPOSITORY }}
+        DOCKER_IMAGE_NAME: ${{ secrets.DOCKER_IMAGE_NAME }}
+      run: |
+        if [ -n "$DOCKER_USERNAME" ] && [ -n "$DOCKER_PASSWORD" ] && [ -n "$DOCKER_REPOSITORY" ] && [ -n "$DOCKER_IMAGE_NAME" ]; then
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "publish=false" >> "$GITHUB_OUTPUT"
+          echo "Docker Hub secrets are incomplete; building linux/amd64 images for validation without pushing."
+        fi
+
     - name: Log in to Docker Hub
+      if: steps.dockerhub.outputs.publish == 'true'
       uses: docker/login-action@v4
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
@@ -59,7 +75,7 @@ jobs:
         fi
 
     - name: Build and push base image
-      if: steps.base.outputs.rebuild == 'true'
+      if: steps.base.outputs.rebuild == 'true' && steps.dockerhub.outputs.publish == 'true'
       uses: docker/build-push-action@v7
       with:
         context: .
@@ -70,8 +86,22 @@ jobs:
         push: true
         tags: ${{ env.FULL_IMAGE_NAME }}:base
 
+    - name: Build base image for CI
+      if: steps.base.outputs.rebuild == 'true' && steps.dockerhub.outputs.publish != 'true'
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ./Dockerfile-base
+        platforms: linux/amd64
+        pull: true
+        no-cache: true
+        load: true
+        tags: docker-wechat:base-ci
+
     - name: Extract WeChat version
       id: version
+      env:
+        CAN_PULL_CURRENT_IMAGE: ${{ steps.dockerhub.outputs.publish }}
       run: |
         WECHAT_URL="$(scripts/resolve-wechat-download.sh amd64)"
         curl --fail --location --retry 5 --retry-delay 10 --retry-all-errors --connect-timeout 30 \
@@ -80,41 +110,45 @@ jobs:
         echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
         echo "download_url=${WECHAT_URL}" >> "$GITHUB_OUTPUT"
 
-        if docker pull "$FULL_IMAGE_NAME:latest" 2>/dev/null; then
+        if [ "$CAN_PULL_CURRENT_IMAGE" = "true" ] && docker pull "$FULL_IMAGE_NAME:latest" 2>/dev/null; then
           OLD_VERSION="$(docker run --rm --platform linux/amd64 "$FULL_IMAGE_NAME:latest" cat /etc/cont-env.d/APP_VERSION)"
         else
           OLD_VERSION="none"
         fi
         echo "old_version=${OLD_VERSION}" >> "$GITHUB_OUTPUT"
 
-    - name: Decide app image push
+    - name: Decide app image build
       id: publish
       env:
         NEW_VERSION: ${{ steps.version.outputs.new_version }}
         OLD_VERSION: ${{ steps.version.outputs.old_version }}
         BASE_REBUILT: ${{ steps.base.outputs.rebuild }}
         FORCE_PUSH: ${{ github.event_name == 'workflow_dispatch' && inputs.force_push }}
+        DOCKERHUB_PUBLISH: ${{ steps.dockerhub.outputs.publish }}
       run: |
-        SHOULD_PUSH=false
+        SHOULD_BUILD=false
         REASON="version unchanged"
 
-        if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
-          SHOULD_PUSH=true
+        if [ "$DOCKERHUB_PUBLISH" != "true" ]; then
+          SHOULD_BUILD=true
+          REASON="Docker Hub secrets missing; validation build only"
+        elif [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
+          SHOULD_BUILD=true
           REASON="new WeChat version: $OLD_VERSION -> $NEW_VERSION"
         elif [ "$BASE_REBUILT" = "true" ]; then
-          SHOULD_PUSH=true
+          SHOULD_BUILD=true
           REASON="base image rebuilt"
         elif [ "$FORCE_PUSH" = "true" ]; then
-          SHOULD_PUSH=true
+          SHOULD_BUILD=true
           REASON="manual force push"
         fi
 
-        echo "should_push=${SHOULD_PUSH}" >> "$GITHUB_OUTPUT"
+        echo "should_build=${SHOULD_BUILD}" >> "$GITHUB_OUTPUT"
         echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
         echo "$REASON"
 
     - name: Build and push app image
-      if: steps.publish.outputs.should_push == 'true'
+      if: steps.publish.outputs.should_build == 'true' && steps.dockerhub.outputs.publish == 'true'
       uses: docker/build-push-action@v7
       with:
         context: .
@@ -132,7 +166,21 @@ jobs:
           org.opencontainers.image.source=https://github.com/${{ github.repository }}
           org.opencontainers.image.version=${{ steps.version.outputs.new_version }}
 
-    - name: Skip image push
-      if: steps.publish.outputs.should_push != 'true'
+    - name: Build app image for CI
+      if: steps.publish.outputs.should_build == 'true' && steps.dockerhub.outputs.publish != 'true'
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ./Dockerfile
+        platforms: linux/amd64
+        pull: false
+        no-cache: true
+        load: true
+        build-args: |
+          BASE_IMAGE=docker-wechat:base-ci
+        tags: docker-wechat:${{ steps.version.outputs.new_version }}
+
+    - name: Skip image build
+      if: steps.publish.outputs.should_build != 'true'
       run: |
-        echo "Skipping push: ${{ steps.publish.outputs.reason }}"
+        echo "Skipping build: ${{ steps.publish.outputs.reason }}"
